@@ -1,6 +1,12 @@
 # Changelog
 All notable changes to the docker containers will be documented in this file.
 
+### 2022-08-05
+ - Alert_on_Unexpected_Content_Types.js > Added Content-Type text/plain to the list of expected types.
+ 
+### 2022-07-30
+ - Updated to use Webswing 22.1.3.
+
 ### 2022-06-06
  - Updated to use Webswing 22.1.2
 
