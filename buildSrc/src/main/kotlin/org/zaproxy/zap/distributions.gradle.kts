@@ -6,6 +6,7 @@ import de.undercouch.gradle.tasks.download.Download
 import de.undercouch.gradle.tasks.download.Verify
 import org.apache.tools.ant.filters.ReplaceTokens
 import org.apache.tools.ant.taskdefs.condition.Os
+import org.gradle.api.file.RelativePath
 import org.cyclonedx.gradle.CycloneDxTask
 import org.zaproxy.zap.tasks.internal.Utils
 import org.zaproxy.zap.tasks.CreateDmg
@@ -237,7 +238,7 @@ listOf(
     }
 
     val unpackMacOSJre = tasks.register<Copy>("unpackMacOSJre${it.suffix}") {
-        dependsOn(verifyMacOsJre, verifyMacOsOpenJfx)
+        dependsOn(verifyMacOsJre)
         from(tarTree(macOsJreFile))
         into(macOsJreUnpackDir)
         doFirst {
@@ -247,37 +248,48 @@ listOf(
             // Rename top level dir to start with "jre" to match the
             // expectations of zap.sh script.
             val dirName = macOsJreUnpackDir.listFiles()[0].name
-            val jreBundleDir = File(macOsJreUnpackDir, "jre-$dirName")
             ant.withGroovyBuilder {
-                "move"(mapOf("file" to "$macOsJreUnpackDir/$dirName", "tofile" to jreBundleDir.absolutePath))
+                "move"(mapOf("file" to "$macOsJreUnpackDir/$dirName", "tofile" to "$macOsJreUnpackDir/jre-$dirName"))
             }
+        }
+    }
 
-            // Bundle OpenJFX into the JRE so Browser View (JavaFX WebView) works
-            // with the macOS .app without a separate JavaFX install.
-            val jreHome = File(jreBundleDir, "Contents/Home")
-            copy {
-                from(zipTree(macOsOpenJfxFile)) {
-                    include("**/lib/*")
-                    exclude("**/src.zip", "**/javafx-swt.jar")
-                    eachFile {
-                        path = relativePath.lastName
-                    }
-                    includeEmptyDirs = false
-                }
-                into(File(jreHome, "javafx/lib"))
+    val macOsOpenJfxUnpackDir = File(macOsJreDir, "openjfxUnpacked")
+    val unpackMacOsOpenJfx = tasks.register<Copy>("unpackMacOsOpenJfx${it.suffix}") {
+        dependsOn(verifyMacOsOpenJfx)
+        from(zipTree(macOsOpenJfxFile)) {
+            include("**/lib/*")
+            exclude("**/src.zip", "**/javafx-swt.jar")
+            eachFile {
+                relativePath = RelativePath.parse(true, relativePath.lastName)
             }
+            includeEmptyDirs = false
+        }
+        into(File(macOsOpenJfxUnpackDir, "lib"))
+        doFirst {
+            delete(macOsOpenJfxUnpackDir)
+        }
+        doLast {
             copy {
                 from(zipTree(macOsOpenJfxFile)) {
                     include("**/legal/**")
                     eachFile {
                         val legalIndex = relativePath.segments.indexOf("legal")
                         if (legalIndex >= 0) {
-                            path = relativePath.segments.drop(legalIndex).joinToString("/")
+                            relativePath = RelativePath(true, *relativePath.segments.drop(legalIndex).toTypedArray())
                         }
                     }
                     includeEmptyDirs = false
                 }
-                into(jreHome)
+                into(macOsOpenJfxUnpackDir)
+            }
+            // Downloaded dylibs get a quarantine flag on macOS; loading them from
+            // a signed JRE/app can kill Java immediately on double-click.
+            if (Os.isFamily(Os.FAMILY_MAC)) {
+                exec {
+                    commandLine("xattr", "-cr", macOsOpenJfxUnpackDir.absolutePath)
+                    isIgnoreExitValue = true
+                }
             }
         }
     }
@@ -310,6 +322,9 @@ listOf(
             into(zapDir)
             exclude(listOf("zap.bat", "zap.ico"))
         }
+        from(unpackMacOsOpenJfx) {
+            into("$zapDir/javafx")
+        }
         from(bundledAddOns) {
             into("$zapDir/plugin")
             exclude(listOf("Readme.txt", "*linux*.zap", "*windows*.zap"))
@@ -317,6 +332,14 @@ listOf(
 
         doFirst {
             delete(macOsDistDataDir)
+        }
+        doLast {
+            if (Os.isFamily(Os.FAMILY_MAC)) {
+                exec {
+                    commandLine("xattr", "-cr", macOsDistDataDir.absolutePath)
+                    isIgnoreExitValue = true
+                }
+            }
         }
     }
 

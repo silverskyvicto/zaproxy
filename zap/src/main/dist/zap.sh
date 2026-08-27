@@ -19,6 +19,12 @@ cd "$BASEDIR"
 # Get Operating System
 OS=$(uname -s)
 
+# Double-click launches have no terminal; keep startup output for diagnosis.
+if [ "$OS" = "Darwin" ] && [ ! -t 0 ]; then
+  mkdir -p "$HOME/Library/Logs"
+  exec >>"$HOME/Library/Logs/ZAP-startup.log" 2>&1
+fi
+
 # If we're on OS X, try to use the bundled Java; if it's not there, then the system Java
 # Life would be much easier if OS X had readlink -f
 if [ "$OS" = "Darwin" ]; then
@@ -143,19 +149,34 @@ then
   echo "Setting debug: $JAVADEBUG"
 fi
 
-# Use OpenJFX bundled inside the macOS JRE (Browser View / JavaFX WebView).
+# OpenJFX is shipped next to ZAP (not inside the signed JRE bundle).
+JAVA_CMD="java"
+if [ -n "$JAVA_PATH" ] && [ -x "$JAVA_PATH/java" ]; then
+  JAVA_CMD="$JAVA_PATH/java"
+fi
+
 JAVAFX_ARGS=()
-if [ "$OS" = "Darwin" ] && [ -n "$JAVA_PATH" ]; then
-  JAVAFX_LIB="$(cd "$JAVA_PATH/../javafx/lib" 2>/dev/null && pwd -P)"
+if [ "$OS" = "Darwin" ]; then
+  JAVAFX_LIB="$BASEDIR/javafx/lib"
   if [ -f "$JAVAFX_LIB/javafx.web.jar" ]; then
-    JAVAFX_ARGS=(--module-path "$JAVAFX_LIB" --add-modules javafx.swing,javafx.web)
+    JAVAFX_MODULE_PATH=""
+    for jfx_jar in "$JAVAFX_LIB"/*.jar; do
+      [ -f "$jfx_jar" ] || continue
+      if [ -z "$JAVAFX_MODULE_PATH" ]; then
+        JAVAFX_MODULE_PATH="$jfx_jar"
+      else
+        JAVAFX_MODULE_PATH="$JAVAFX_MODULE_PATH:$jfx_jar"
+      fi
+    done
+    JAVAFX_ARGS=(--module-path "$JAVAFX_MODULE_PATH" --add-modules javafx.swing,javafx.web)
+    echo "Using bundled OpenJFX: $JAVAFX_LIB"
   fi
 fi
 
 # Start ZAP; it's likely that -Xdock:icon would be ignored on other platforms, but this is known to work
 if [ "$OS" = "Darwin" ]; then
   # It's likely that -Xdock:icon would be ignored on other platforms, but this is known to work
-  exec java "${JAVAFX_ARGS[@]}" ${JMEM} ${JAVAGC} ${JAVADEBUG} -Xdock:icon="../Resources/ZAP.icns" -jar "${BASEDIR}/@zapJar@" "${ARGS[@]}"
+  exec "$JAVA_CMD" "${JAVAFX_ARGS[@]}" ${JMEM} ${JAVAGC} ${JAVADEBUG} -Xdock:icon="../Resources/ZAP.icns" -jar "${BASEDIR}/@zapJar@" "${ARGS[@]}"
 else
   exec java ${JMEM} ${JAVAGC} ${JAVADEBUG} -jar "${BASEDIR}/@zapJar@" "${ARGS[@]}"
 fi
