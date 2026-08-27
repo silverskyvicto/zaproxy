@@ -157,19 +157,23 @@ fi
 
 JAVAFX_ARGS=()
 if [ "$OS" = "Darwin" ]; then
-  JAVAFX_LIB="$BASEDIR/javafx/lib"
-  if [ -f "$JAVAFX_LIB/javafx.web.jar" ]; then
-    JAVAFX_MODULE_PATH=""
-    for jfx_jar in "$JAVAFX_LIB"/*.jar; do
-      [ -f "$jfx_jar" ] || continue
-      if [ -z "$JAVAFX_MODULE_PATH" ]; then
-        JAVAFX_MODULE_PATH="$jfx_jar"
-      else
-        JAVAFX_MODULE_PATH="$JAVAFX_MODULE_PATH:$jfx_jar"
-      fi
-    done
-    JAVAFX_ARGS=(--module-path "$JAVAFX_MODULE_PATH" --add-modules javafx.swing,javafx.web)
+  JAVAFX_LIB=""
+  for JAVAFX_CANDIDATE in "$BASEDIR/javafx/lib" "$BASEDIR/javafx"; do
+    if [ -f "$JAVAFX_CANDIDATE/javafx.web.jar" ]; then
+      JAVAFX_LIB="$JAVAFX_CANDIDATE"
+      break
+    fi
+  done
+  if [ -n "$JAVAFX_LIB" ]; then
+    JAVAFX_NATIVE_PATH="$JAVAFX_LIB"
+    if [ -n "$JAVA_PATH" ]; then
+      JAVAFX_NATIVE_PATH="$JAVAFX_LIB:$JAVA_PATH/../lib"
+    fi
+    # Directory module-path keeps jars and dylibs together for NativeLibLoader.
+    JAVAFX_ARGS=(--module-path "$JAVAFX_LIB" --add-modules javafx.swing,javafx.web -Djava.library.path="$JAVAFX_NATIVE_PATH")
     echo "Using bundled OpenJFX: $JAVAFX_LIB"
+  else
+    echo "Bundled OpenJFX not found under $BASEDIR/javafx"
   fi
 fi
 

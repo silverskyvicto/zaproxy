@@ -261,28 +261,25 @@ listOf(
             include("**/lib/*")
             exclude("**/src.zip", "**/javafx-swt.jar")
             eachFile {
-                relativePath = RelativePath.parse(true, relativePath.lastName)
+                relativePath = RelativePath.parse(true, "lib/${relativePath.lastName}")
             }
             includeEmptyDirs = false
         }
-        into(File(macOsOpenJfxUnpackDir, "lib"))
+        from(zipTree(macOsOpenJfxFile)) {
+            include("**/legal/**")
+            eachFile {
+                val legalIndex = relativePath.segments.indexOf("legal")
+                if (legalIndex >= 0) {
+                    relativePath = RelativePath(true, *relativePath.segments.drop(legalIndex).toTypedArray())
+                }
+            }
+            includeEmptyDirs = false
+        }
+        into(macOsOpenJfxUnpackDir)
         doFirst {
             delete(macOsOpenJfxUnpackDir)
         }
         doLast {
-            copy {
-                from(zipTree(macOsOpenJfxFile)) {
-                    include("**/legal/**")
-                    eachFile {
-                        val legalIndex = relativePath.segments.indexOf("legal")
-                        if (legalIndex >= 0) {
-                            relativePath = RelativePath(true, *relativePath.segments.drop(legalIndex).toTypedArray())
-                        }
-                    }
-                    includeEmptyDirs = false
-                }
-                into(macOsOpenJfxUnpackDir)
-            }
             // Downloaded dylibs get a quarantine flag on macOS; loading them from
             // a signed JRE/app can kill Java immediately on double-click.
             if (Os.isFamily(Os.FAMILY_MAC)) {
