@@ -150,14 +150,18 @@ then
 fi
 
 # OpenJFX is shipped next to ZAP (not inside the signed JRE bundle).
+# Temurin JRE does not contain jdk.unsupported.desktop, which javafx.swing
+# requires as a module. Load JavaFX from the class path instead so that
+# module requires are not enforced (ZAP is a non-modular Swing app).
 JAVA_CMD="java"
 if [ -n "$JAVA_PATH" ] && [ -x "$JAVA_PATH/java" ]; then
   JAVA_CMD="$JAVA_PATH/java"
 fi
 
-JAVAFX_ARGS=()
+JAVAFX_LIB=""
+JAVAFX_CP=""
+JAVAFX_NATIVE_PATH=""
 if [ "$OS" = "Darwin" ]; then
-  JAVAFX_LIB=""
   for JAVAFX_CANDIDATE in "$BASEDIR/javafx/lib" "$BASEDIR/javafx"; do
     if [ -f "$JAVAFX_CANDIDATE/javafx.web.jar" ]; then
       JAVAFX_LIB="$JAVAFX_CANDIDATE"
@@ -169,8 +173,14 @@ if [ "$OS" = "Darwin" ]; then
     if [ -n "$JAVA_PATH" ]; then
       JAVAFX_NATIVE_PATH="$JAVAFX_LIB:$JAVA_PATH/../lib"
     fi
-    # Directory module-path keeps jars and dylibs together for NativeLibLoader.
-    JAVAFX_ARGS=(--module-path "$JAVAFX_LIB" --add-modules javafx.swing,javafx.web -Djava.library.path="$JAVAFX_NATIVE_PATH")
+    for jfx_jar in "$JAVAFX_LIB"/*.jar; do
+      [ -f "$jfx_jar" ] || continue
+      if [ -z "$JAVAFX_CP" ]; then
+        JAVAFX_CP="$jfx_jar"
+      else
+        JAVAFX_CP="$JAVAFX_CP:$jfx_jar"
+      fi
+    done
     echo "Using bundled OpenJFX: $JAVAFX_LIB"
   else
     echo "Bundled OpenJFX not found under $BASEDIR/javafx"
@@ -179,8 +189,20 @@ fi
 
 # Start ZAP; it's likely that -Xdock:icon would be ignored on other platforms, but this is known to work
 if [ "$OS" = "Darwin" ]; then
-  # It's likely that -Xdock:icon would be ignored on other platforms, but this is known to work
-  exec "$JAVA_CMD" "${JAVAFX_ARGS[@]}" ${JMEM} ${JAVAGC} ${JAVADEBUG} -Xdock:icon="../Resources/ZAP.icns" -jar "${BASEDIR}/@zapJar@" "${ARGS[@]}"
+  if [ -n "$JAVAFX_CP" ]; then
+    ZAP_CP="${BASEDIR}/@zapJar@"
+    if [ -d "${BASEDIR}/lib" ]; then
+      for zap_lib in "${BASEDIR}"/lib/*.jar; do
+        [ -f "$zap_lib" ] && ZAP_CP="$ZAP_CP:$zap_lib"
+      done
+    fi
+    exec "$JAVA_CMD" ${JMEM} ${JAVAGC} ${JAVADEBUG} \
+      -Djava.library.path="$JAVAFX_NATIVE_PATH" \
+      -Xdock:icon="../Resources/ZAP.icns" \
+      -cp "$ZAP_CP:$JAVAFX_CP" org.zaproxy.zap.ZAP "${ARGS[@]}"
+  else
+    exec "$JAVA_CMD" ${JMEM} ${JAVAGC} ${JAVADEBUG} -Xdock:icon="../Resources/ZAP.icns" -jar "${BASEDIR}/@zapJar@" "${ARGS[@]}"
+  fi
 else
   exec java ${JMEM} ${JAVAGC} ${JAVADEBUG} -jar "${BASEDIR}/@zapJar@" "${ARGS[@]}"
 fi
