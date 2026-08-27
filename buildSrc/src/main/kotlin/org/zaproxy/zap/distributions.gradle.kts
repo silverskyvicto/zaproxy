@@ -188,8 +188,8 @@ tasks.register<Tar>("distLinux") {
 }
 
 listOf(
-    MacArch("", "", "", "x64", "x86_64", "false", "0fe26252c258ec239ea6d39a6a1f42b75025bff0d237e9ab3acb4782cef29439"),
-    MacArch("Arm64", "_aarch64", " (ARM64)", "aarch64", "arm64", "true", "b37759cce74d3104da243c5a4ca1f8a73d6d8811b4a1711028744ec5559f7eb0")
+    MacArch("", "", "", "x64", "x86_64", "false", "0fe26252c258ec239ea6d39a6a1f42b75025bff0d237e9ab3acb4782cef29439", "83ab455227a3dbc7d48bd530dc7a7c2f7c9ddf0018048fc370bfbe9ba047802f"),
+    MacArch("Arm64", "_aarch64", " (ARM64)", "aarch64", "arm64", "true", "b37759cce74d3104da243c5a4ca1f8a73d6d8811b4a1711028744ec5559f7eb0", "adcd99c21b8e57b430328520b601f50dcd8c834c4f006afd628be7007b62a93f")
 ).forEach { it ->
 
     val volumeName = "ZAP"
@@ -198,6 +198,8 @@ listOf(
     val macOsJreUnpackDir = File(macOsJreDir, "unpacked")
     val macOsJreVersion = "17.0.17+10"
     val macOsJreFile = File(macOsJreDir, "jdk$macOsJreVersion-jre.tar.gz")
+    val macOsOpenJfxVersion = "17.0.20"
+    val macOsOpenJfxFile = File(macOsJreDir, "openjfx-$macOsOpenJfxVersion-osx-${it.arch}-sdk.zip")
 
     val downloadMacOsJre = tasks.register<Download>("downloadMacOsJre${it.suffix}") {
         src("https://api.adoptium.net/v3/binary/version/jdk-$macOsJreVersion/mac/${it.arch}/jre/hotspot/normal/eclipse?project=jdk")
@@ -219,8 +221,23 @@ listOf(
         checksum(it.checksum)
     }
 
+    val downloadMacOsOpenJfx = tasks.register<Download>("downloadMacOsOpenJfx${it.suffix}") {
+        src("https://download2.gluonhq.com/openjfx/$macOsOpenJfxVersion/openjfx-${macOsOpenJfxVersion}_osx-${it.arch}_bin-sdk.zip")
+        dest(macOsOpenJfxFile)
+        connectTimeout(60_000)
+        readTimeout(60_000)
+        onlyIfModified(true)
+    }
+
+    val verifyMacOsOpenJfx = tasks.register<Verify>("verifyMacOsOpenJfx${it.suffix}") {
+        dependsOn(downloadMacOsOpenJfx)
+        src(macOsOpenJfxFile)
+        algorithm("SHA-256")
+        checksum(it.openJfxChecksum)
+    }
+
     val unpackMacOSJre = tasks.register<Copy>("unpackMacOSJre${it.suffix}") {
-        dependsOn(verifyMacOsJre)
+        dependsOn(verifyMacOsJre, verifyMacOsOpenJfx)
         from(tarTree(macOsJreFile))
         into(macOsJreUnpackDir)
         doFirst {
@@ -230,8 +247,37 @@ listOf(
             // Rename top level dir to start with "jre" to match the
             // expectations of zap.sh script.
             val dirName = macOsJreUnpackDir.listFiles()[0].name
+            val jreBundleDir = File(macOsJreUnpackDir, "jre-$dirName")
             ant.withGroovyBuilder {
-                "move"(mapOf("file" to "$macOsJreUnpackDir/$dirName", "tofile" to "$macOsJreUnpackDir/jre-$dirName"))
+                "move"(mapOf("file" to "$macOsJreUnpackDir/$dirName", "tofile" to jreBundleDir.absolutePath))
+            }
+
+            // Bundle OpenJFX into the JRE so Browser View (JavaFX WebView) works
+            // with the macOS .app without a separate JavaFX install.
+            val jreHome = File(jreBundleDir, "Contents/Home")
+            copy {
+                from(zipTree(macOsOpenJfxFile)) {
+                    include("**/lib/*")
+                    exclude("**/src.zip", "**/javafx-swt.jar")
+                    eachFile {
+                        path = relativePath.lastName
+                    }
+                    includeEmptyDirs = false
+                }
+                into(File(jreHome, "javafx/lib"))
+            }
+            copy {
+                from(zipTree(macOsOpenJfxFile)) {
+                    include("**/legal/**")
+                    eachFile {
+                        val legalIndex = relativePath.segments.indexOf("legal")
+                        if (legalIndex >= 0) {
+                            path = relativePath.segments.drop(legalIndex).joinToString("/")
+                        }
+                    }
+                    includeEmptyDirs = false
+                }
+                into(jreHome)
             }
         }
     }
@@ -416,5 +462,6 @@ data class MacArch(
     val arch: String,
     val lsArchitecture: String,
     val lsRequiresNativeExecution: String,
-    val checksum: String
+    val checksum: String,
+    val openJfxChecksum: String
 )

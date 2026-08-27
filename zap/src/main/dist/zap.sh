@@ -143,10 +143,19 @@ then
   echo "Setting debug: $JAVADEBUG"
 fi
 
+# Use OpenJFX bundled inside the macOS JRE (Browser View / JavaFX WebView).
+JAVAFX_ARGS=()
+if [ "$OS" = "Darwin" ] && [ -n "$JAVA_PATH" ]; then
+  JAVAFX_LIB="$(cd "$JAVA_PATH/../javafx/lib" 2>/dev/null && pwd -P)"
+  if [ -f "$JAVAFX_LIB/javafx.web.jar" ]; then
+    JAVAFX_ARGS=(--module-path "$JAVAFX_LIB" --add-modules javafx.swing,javafx.web)
+  fi
+fi
+
 # Start ZAP; it's likely that -Xdock:icon would be ignored on other platforms, but this is known to work
 if [ "$OS" = "Darwin" ]; then
   # It's likely that -Xdock:icon would be ignored on other platforms, but this is known to work
-  exec java ${JMEM} ${JAVAGC} ${JAVADEBUG} -Xdock:icon="../Resources/ZAP.icns" -jar "${BASEDIR}/@zapJar@" "${ARGS[@]}"
+  exec java "${JAVAFX_ARGS[@]}" ${JMEM} ${JAVAGC} ${JAVADEBUG} -Xdock:icon="../Resources/ZAP.icns" -jar "${BASEDIR}/@zapJar@" "${ARGS[@]}"
 else
   exec java ${JMEM} ${JAVAGC} ${JAVADEBUG} -jar "${BASEDIR}/@zapJar@" "${ARGS[@]}"
 fi
