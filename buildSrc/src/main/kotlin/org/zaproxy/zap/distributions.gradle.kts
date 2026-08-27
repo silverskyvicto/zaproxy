@@ -287,6 +287,10 @@ listOf(
             // a signed JRE/app can kill Java immediately on double-click.
             if (Os.isFamily(Os.FAMILY_MAC)) {
                 exec {
+                    commandLine("chmod", "-R", "u+w", macOsOpenJfxUnpackDir.absolutePath)
+                    isIgnoreExitValue = true
+                }
+                exec {
                     commandLine("xattr", "-cr", macOsOpenJfxUnpackDir.absolutePath)
                     isIgnoreExitValue = true
                 }
@@ -334,10 +338,20 @@ listOf(
             delete(macOsDistDataDir)
         }
         doLast {
+            // Only clear quarantine on OpenJFX. The bundled JRE contains
+            // read-only files (legal texts, CDS archives) that xattr cannot
+            // modify and would log Permission denied.
             if (Os.isFamily(Os.FAMILY_MAC)) {
-                exec {
-                    commandLine("xattr", "-cr", macOsDistDataDir.absolutePath)
-                    isIgnoreExitValue = true
+                val javafxDir = File(macOsDistDataDir, "$appName/Contents/Java/javafx")
+                if (javafxDir.exists()) {
+                    exec {
+                        commandLine("chmod", "-R", "u+w", javafxDir.absolutePath)
+                        isIgnoreExitValue = true
+                    }
+                    exec {
+                        commandLine("xattr", "-cr", javafxDir.absolutePath)
+                        isIgnoreExitValue = true
+                    }
                 }
             }
         }
