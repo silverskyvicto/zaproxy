@@ -189,8 +189,8 @@ tasks.register<Tar>("distLinux") {
 }
 
 listOf(
-    MacArch("", "", "", "x64", "x86_64", "false", "0fe26252c258ec239ea6d39a6a1f42b75025bff0d237e9ab3acb4782cef29439", "83ab455227a3dbc7d48bd530dc7a7c2f7c9ddf0018048fc370bfbe9ba047802f"),
-    MacArch("Arm64", "_aarch64", " (ARM64)", "aarch64", "arm64", "true", "b37759cce74d3104da243c5a4ca1f8a73d6d8811b4a1711028744ec5559f7eb0", "adcd99c21b8e57b430328520b601f50dcd8c834c4f006afd628be7007b62a93f")
+    MacArch("", "", "", "x64", "x86_64", "false", "a2a7bfd3a767fcaf35a2e96cc562e6a63cd695e08c1a896222303c4e978da3d6", "83ab455227a3dbc7d48bd530dc7a7c2f7c9ddf0018048fc370bfbe9ba047802f"),
+    MacArch("Arm64", "_aarch64", " (ARM64)", "aarch64", "arm64", "true", "856059de21518c2ff6eba6126ffc93390affe363c3ee205b3146a3bac3be0aa5", "adcd99c21b8e57b430328520b601f50dcd8c834c4f006afd628be7007b62a93f")
 ).forEach { it ->
 
     val volumeName = "ZAP"
@@ -198,12 +198,13 @@ listOf(
     val macOsJreDir = layout.buildDirectory.dir("macOsJre${it.suffix}").get().asFile
     val macOsJreUnpackDir = File(macOsJreDir, "unpacked")
     val macOsJreVersion = "17.0.17+10"
-    val macOsJreFile = File(macOsJreDir, "jdk$macOsJreVersion-jre.tar.gz")
+    // JDK (not JRE): javafx.swing needs jdk.unsupported.desktop, which Temurin JRE omits.
+    val macOsJreFile = File(macOsJreDir, "jdk$macOsJreVersion.tar.gz")
     val macOsOpenJfxVersion = "17.0.20"
     val macOsOpenJfxFile = File(macOsJreDir, "openjfx-$macOsOpenJfxVersion-osx-${it.arch}-sdk.zip")
 
     val downloadMacOsJre = tasks.register<Download>("downloadMacOsJre${it.suffix}") {
-        src("https://api.adoptium.net/v3/binary/version/jdk-$macOsJreVersion/mac/${it.arch}/jre/hotspot/normal/eclipse?project=jdk")
+        src("https://api.adoptium.net/v3/binary/version/jdk-$macOsJreVersion/mac/${it.arch}/jdk/hotspot/normal/eclipse?project=jdk")
         dest(macOsJreFile)
         connectTimeout(60_000)
         readTimeout(60_000)
