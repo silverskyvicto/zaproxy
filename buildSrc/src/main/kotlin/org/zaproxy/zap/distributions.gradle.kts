@@ -6,6 +6,7 @@ import de.undercouch.gradle.tasks.download.Download
 import de.undercouch.gradle.tasks.download.Verify
 import org.apache.tools.ant.filters.ReplaceTokens
 import org.apache.tools.ant.taskdefs.condition.Os
+import org.gradle.api.file.RelativePath
 import org.cyclonedx.gradle.CycloneDxTask
 import org.zaproxy.zap.tasks.internal.Utils
 import org.zaproxy.zap.tasks.CreateDmg
@@ -188,8 +189,8 @@ tasks.register<Tar>("distLinux") {
 }
 
 listOf(
-    MacArch("", "", "", "x64", "x86_64", "false", "0fe26252c258ec239ea6d39a6a1f42b75025bff0d237e9ab3acb4782cef29439"),
-    MacArch("Arm64", "_aarch64", " (ARM64)", "aarch64", "arm64", "true", "b37759cce74d3104da243c5a4ca1f8a73d6d8811b4a1711028744ec5559f7eb0")
+    MacArch("", "", "", "x64", "x86_64", "false", "a2a7bfd3a767fcaf35a2e96cc562e6a63cd695e08c1a896222303c4e978da3d6", "83ab455227a3dbc7d48bd530dc7a7c2f7c9ddf0018048fc370bfbe9ba047802f"),
+    MacArch("Arm64", "_aarch64", " (ARM64)", "aarch64", "arm64", "true", "856059de21518c2ff6eba6126ffc93390affe363c3ee205b3146a3bac3be0aa5", "adcd99c21b8e57b430328520b601f50dcd8c834c4f006afd628be7007b62a93f")
 ).forEach { it ->
 
     val volumeName = "ZAP"
@@ -197,10 +198,13 @@ listOf(
     val macOsJreDir = layout.buildDirectory.dir("macOsJre${it.suffix}").get().asFile
     val macOsJreUnpackDir = File(macOsJreDir, "unpacked")
     val macOsJreVersion = "17.0.17+10"
-    val macOsJreFile = File(macOsJreDir, "jdk$macOsJreVersion-jre.tar.gz")
+    // JDK (not JRE): javafx.swing needs jdk.unsupported.desktop, which Temurin JRE omits.
+    val macOsJreFile = File(macOsJreDir, "jdk$macOsJreVersion.tar.gz")
+    val macOsOpenJfxVersion = "17.0.20"
+    val macOsOpenJfxFile = File(macOsJreDir, "openjfx-$macOsOpenJfxVersion-osx-${it.arch}-sdk.zip")
 
     val downloadMacOsJre = tasks.register<Download>("downloadMacOsJre${it.suffix}") {
-        src("https://api.adoptium.net/v3/binary/version/jdk-$macOsJreVersion/mac/${it.arch}/jre/hotspot/normal/eclipse?project=jdk")
+        src("https://api.adoptium.net/v3/binary/version/jdk-$macOsJreVersion/mac/${it.arch}/jdk/hotspot/normal/eclipse?project=jdk")
         dest(macOsJreFile)
         connectTimeout(60_000)
         readTimeout(60_000)
@@ -219,6 +223,21 @@ listOf(
         checksum(it.checksum)
     }
 
+    val downloadMacOsOpenJfx = tasks.register<Download>("downloadMacOsOpenJfx${it.suffix}") {
+        src("https://download2.gluonhq.com/openjfx/$macOsOpenJfxVersion/openjfx-${macOsOpenJfxVersion}_osx-${it.arch}_bin-sdk.zip")
+        dest(macOsOpenJfxFile)
+        connectTimeout(60_000)
+        readTimeout(60_000)
+        onlyIfModified(true)
+    }
+
+    val verifyMacOsOpenJfx = tasks.register<Verify>("verifyMacOsOpenJfx${it.suffix}") {
+        dependsOn(downloadMacOsOpenJfx)
+        src(macOsOpenJfxFile)
+        algorithm("SHA-256")
+        checksum(it.openJfxChecksum)
+    }
+
     val unpackMacOSJre = tasks.register<Copy>("unpackMacOSJre${it.suffix}") {
         dependsOn(verifyMacOsJre)
         from(tarTree(macOsJreFile))
@@ -232,6 +251,47 @@ listOf(
             val dirName = macOsJreUnpackDir.listFiles()[0].name
             ant.withGroovyBuilder {
                 "move"(mapOf("file" to "$macOsJreUnpackDir/$dirName", "tofile" to "$macOsJreUnpackDir/jre-$dirName"))
+            }
+        }
+    }
+
+    val macOsOpenJfxUnpackDir = File(macOsJreDir, "openjfxUnpacked")
+    val unpackMacOsOpenJfx = tasks.register<Copy>("unpackMacOsOpenJfx${it.suffix}") {
+        dependsOn(verifyMacOsOpenJfx)
+        from(zipTree(macOsOpenJfxFile)) {
+            include("**/lib/*")
+            exclude("**/src.zip", "**/javafx-swt.jar")
+            eachFile {
+                relativePath = RelativePath.parse(true, "lib/${relativePath.lastName}")
+            }
+            includeEmptyDirs = false
+        }
+        from(zipTree(macOsOpenJfxFile)) {
+            include("**/legal/**")
+            eachFile {
+                val legalIndex = relativePath.segments.indexOf("legal")
+                if (legalIndex >= 0) {
+                    relativePath = RelativePath(true, *relativePath.segments.drop(legalIndex).toTypedArray())
+                }
+            }
+            includeEmptyDirs = false
+        }
+        into(macOsOpenJfxUnpackDir)
+        doFirst {
+            delete(macOsOpenJfxUnpackDir)
+        }
+        doLast {
+            // Downloaded dylibs get a quarantine flag on macOS; loading them from
+            // a signed JRE/app can kill Java immediately on double-click.
+            if (Os.isFamily(Os.FAMILY_MAC)) {
+                exec {
+                    commandLine("chmod", "-R", "u+w", macOsOpenJfxUnpackDir.absolutePath)
+                    isIgnoreExitValue = true
+                }
+                exec {
+                    commandLine("xattr", "-cr", macOsOpenJfxUnpackDir.absolutePath)
+                    isIgnoreExitValue = true
+                }
             }
         }
     }
@@ -264,6 +324,9 @@ listOf(
             into(zapDir)
             exclude(listOf("zap.bat", "zap.ico"))
         }
+        from(unpackMacOsOpenJfx) {
+            into("$zapDir/javafx")
+        }
         from(bundledAddOns) {
             into("$zapDir/plugin")
             exclude(listOf("Readme.txt", "*linux*.zap", "*windows*.zap"))
@@ -271,6 +334,24 @@ listOf(
 
         doFirst {
             delete(macOsDistDataDir)
+        }
+        doLast {
+            // Only clear quarantine on OpenJFX. The bundled JRE contains
+            // read-only files (legal texts, CDS archives) that xattr cannot
+            // modify and would log Permission denied.
+            if (Os.isFamily(Os.FAMILY_MAC)) {
+                val javafxDir = File(macOsDistDataDir, "$appName/Contents/Java/javafx")
+                if (javafxDir.exists()) {
+                    exec {
+                        commandLine("chmod", "-R", "u+w", javafxDir.absolutePath)
+                        isIgnoreExitValue = true
+                    }
+                    exec {
+                        commandLine("xattr", "-cr", javafxDir.absolutePath)
+                        isIgnoreExitValue = true
+                    }
+                }
+            }
         }
     }
 
@@ -416,5 +497,6 @@ data class MacArch(
     val arch: String,
     val lsArchitecture: String,
     val lsRequiresNativeExecution: String,
-    val checksum: String
+    val checksum: String,
+    val openJfxChecksum: String
 )
